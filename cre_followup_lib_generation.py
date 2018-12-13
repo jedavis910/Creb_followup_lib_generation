@@ -6,7 +6,6 @@ import numpy as np
 random.seed(123)
 
 
-
 def fasta_reader(filename):
 	'''
 	Read in fasta file as dictionary, with headers as keys and 
@@ -124,7 +123,8 @@ def most_scramble(sequence, n_iter):
 	'''
 	Scramble sequence n_iter times and choose the most scrambled sequence
 	'''
-	scrambled_seqs = [''.join(random.sample(list(sequence), len(sequence))) for i in range(n_iter)]
+	scrambled_seqs = [''.join(random.sample(list(sequence), 
+                                         len(sequence))) for i in range(n_iter)]
 	similarity = [similar(sequence, x) for x in scrambled_seqs]
 	max_scrambled = scrambled_seqs[np.argmin(similarity)]
 	return max_scrambled
@@ -156,6 +156,7 @@ if __name__ == '__main__':
 	# will convert to all uppercase for final version to be sent to Agilent
     consensus = 'TGACGTCA'.lower()
     consensus_flank = 'ATTGACGTCAGC'.lower()
+    consensus_flank_rc = 'GCTGACGTCAAT'.lower()
     moderate = 'TGACGTCT'.lower()
     moderate_flank = 'ATTGACGTCTGC'.lower()
     weak = 'TGAAGTCA'.lower()
@@ -164,7 +165,7 @@ if __name__ == '__main__':
     nosite_flank = 'XXXXXXXXXXXX'.lower()
 
 
-#------------------------------------------------------------------------
+#------------------------------------------------------------------------------
 #Generating the gc content background library with CREs
 
 bgs_top3 = capitalize_values(csv_reader('bgs_top3.csv'))
@@ -216,6 +217,7 @@ for x in bgs_top3_name:
 csv_writer(tiles, 'cre_test_scramble.csv')
 
 
+#------------------------------------------------------------------------------
 #Add 0-6 consensus CRE sites to backgrounds
 
 cre_vars = [nosite_flank, consensus_flank]
@@ -259,6 +261,44 @@ for x in bgs_top3_name:
 
 csv_writer(cre_combs, 'cre_test_sixsite.csv')
 
+
+#------------------------------------------------------------------------------
+#Design the 2-site library again with CREs spaced 5-20 bp apart and CRE sites 
+#varying between consensus CREs and their reverse complement. Move both CREs
+#along backgrounds maintaining spacing. Keep in mind both CRE sites are 12 bp
+#long
+
+cre_spac_dist_orient = {}
+bg = []
+cre_sites = [consensus_flank, consensus_flank_rc]
+cre_names = ['consensus', 'RCconsensus']
+
+#spacing refers to number of bases in between the two CREs with flanks so 
+#spacing + 4 refers to the actual number of bases between CREs
+
+spacing = [1, 6, 11, 16, 66]
+
+for x in bgs_top3_name:
+    bg = bgs_top3_name[x]
+    for space in spacing:
+        for j in range(len(cre_sites)):
+            for k in range(len(cre_sites)):
+                seqs = [bg[:i] + cre_sites[j] + bg[i + len(cre_sites[j]):i + len(cre_sites[j]) + space] + cre_sites[k] + bg[i + 2*len(cre_sites[k]) + space:]
+						for i in range(len(bg)-(2*12 + space) + 1)]
+
+			twobs_spacing = {'2BS ' + str(space) + ' bp spacing consensus+flank x2_dist_' + str((150 - (2*len(consensus_flank)+space)-i)) + '_' + x : seqs[i]
+								for i in range(len(seqs))}
+			consensus_flank_spacing.update(twobs_spacing)
+
+	subpool_libraries['subpool_3'] = consensus_flank_spacing
+	print len(consensus_flank_spacing), "sequences in subpool 3"
+
+
+
+
+
+
+#oldcode
 
 #------------------------------------------------------------------------------
 #Design an optimized library that tests 5 sites with spacing that places CREs
@@ -317,7 +357,7 @@ csv_writer(spacing_2bp, 'cre_test_optim_1.csv')
 
 
 
-#oldcode
+
 
 def name_gc_content_background(backgrounds):
     gc_names = []
