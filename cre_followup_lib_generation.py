@@ -71,6 +71,7 @@ def check_REs(lib):
 	
 	return good_seqs
 
+
 def reverse_complement(seq):
 	"""
 	Return the reverse complement of a nucleotide string
@@ -120,14 +121,14 @@ def similar(a, b):
     return num_same
 
 def most_scramble(sequence, n_iter):
-	'''
-	Scramble sequence n_iter times and choose the most scrambled sequence
-	'''
-	scrambled_seqs = [''.join(random.sample(list(sequence), 
-                                         len(sequence))) for i in range(n_iter)]
-	similarity = [similar(sequence, x) for x in scrambled_seqs]
-	max_scrambled = scrambled_seqs[np.argmin(similarity)]
-	return max_scrambled
+    '''
+    Scramble sequence n_iter times and choose the most scrambled sequence
+    '''
+    scrambled_seqs = [''.join(random.sample(list(sequence), 
+                                            len(sequence))) for i in range(n_iter)]
+    similarity = [similar(sequence, x) for x in scrambled_seqs]
+    max_scrambled = scrambled_seqs[np.argmin(similarity)]
+    return max_scrambled
 
 def calculate_gc(seq):
 	count = 0
@@ -156,7 +157,6 @@ if __name__ == '__main__':
 	# will convert to all uppercase for final version to be sent to Agilent
     consensus = 'TGACGTCA'.lower()
     consensus_flank = 'ATTGACGTCAGC'.lower()
-    consensus_flank_rc = 'GCTGACGTCAAT'.lower()
     moderate = 'TGACGTCT'.lower()
     moderate_flank = 'ATTGACGTCTGC'.lower()
     weak = 'TGAAGTCA'.lower()
@@ -171,7 +171,7 @@ if __name__ == '__main__':
 bgs_top3 = capitalize_values(csv_reader('bgs_top3.csv'))
 
 
-#Add name for backgrounds with number and GC content
+#Add name for backgrounds with number
 
 def name_background(backgrounds):
     bg_names = []
@@ -199,34 +199,64 @@ csv_writer(bgs_top3_name, 'bgs_top3_name.csv')
 
 tiles = {}
 
-for x in bgs_top3_name:
+combined_bgs = {**bgs_top3_name, **old_bgs}
 
-	bg = bgs_top3_name[x]
-	for i in range(0, len(bg), 5):
-		if i + 10 > len(bg):
-			continue
-		to_scramble = bg[i:i+10]
-		scrambled = most_scramble(to_scramble, 100)
-		tile = bg[:i] + ''.join(scrambled).lower() + bg[i+10:]
-		tile_name = 'scramble_dist_' + str(140-i) + '_similarity_' + str(similar(to_scramble, scrambled)) + '_' + x
-		tiles[tile_name] = tile
-
-	subpool_libraries['minP'] = tiles
-	print(len(tiles), 'scrambled sequences in minP subpool')
+for x in combined_bgs:
+    
+    bg = combined_bgs[x]
+    counter = 0
+    re_patterns = [re.compile('ACGCGT'), re.compile('GGTACC'), 
+                   re.compile('TCTAGA'), re.compile('ACTAGT'),
+                   re.compile('CGTCA'), re.compile('TGACG')]
+    
+    for i in range(0, len(bg), 5):
+        if i + 10 > len(bg):
+            continue
+        to_scramble = bg[i:i+10]
+        scrambled = most_scramble(to_scramble, 100)
+        tile = bg[:i] + ''.join(scrambled).lower() + bg[i+10:]
+        matches = [re.search(pattern, tile.upper()) for pattern in re_patterns]
+        match_count = sum([1 for match in matches if match != None])
+        if match_count == 0:
+            kept_scramble = tile
+        else:
+            scrambled = most_scramble(to_scramble, 1000)
+            tile = bg[:i] + ''.join(scrambled).lower() + bg[i+10:]
+            matches = [re.search(pattern, tile.upper()) for pattern in re_patterns]
+            match_count = sum([1 for match in matches if match != None])
+            if match_count == 0:
+                kept_scramble = tile
+            else:
+                scrambled = most_scramble(to_scramble, 10)
+                tile = bg[:i] + ''.join(scrambled).lower() + bg[i+10:]
+                matches = [re.search(pattern, tile.upper()) for pattern in re_patterns]
+                match_count = sum([1 for match in matches if match != None])
+                if match_count == 0:
+                    kept_scramble = tile
+                else:
+                    counter = 1 + counter
+                    
+        tile_name = 'scramble_dist_' + str(140-i) + '_similarity_' + str(similar(to_scramble, scrambled)) + '_' + x
+        tiles[tile_name] = kept_scramble
+            
+    subpool_libraries['minP'] = tiles
+    print(len(tiles), 'scrambled sequences in minP subpool')
+    print(str(counter), ' scrambled sequences still contain unwanted motifs')
     
 csv_writer(tiles, 'cre_test_scramble.csv')
 
+           
 
 #------------------------------------------------------------------------------
-#Add 0-6 consensus CRE sites to backgrounds
+#Add 0-6 consensus CRE sites to backgrounds, use old backgrounds as a control
 
 cre_vars = [nosite_flank, consensus_flank]
 names = ['nosite', 'consensus']
 cre_combs = {}
 bg = []
 
-for x in bgs_top3_name:
-    bg = bgs_top3_name[x]
+for x in combined_bgs:
+    bg = combined_bgs[x]
     # the six sites are in a constant position on the template, so parse out
     # the parts of the template we're going to use now
     spacers = [bg[i:i+13] for i in range(0, len(bg), 25)]
@@ -256,7 +286,7 @@ for x in bgs_top3_name:
                             cre_combs[header] = seq
                             subpool_libraries['minP'] = cre_combs
                             
-        print(len(cre_combs), "affinity x background sequences in minP subpool")
+        print(len(cre_combs), "sixsite sequences in minP subpool")
         
 
 csv_writer(cre_combs, 'cre_test_sixsite.csv')
@@ -266,36 +296,69 @@ csv_writer(cre_combs, 'cre_test_sixsite.csv')
 #Design the 2-site library again with CREs spaced 5-20 bp apart and CRE sites 
 #varying between consensus CREs and their reverse complement. Move both CREs
 #along backgrounds maintaining spacing. Keep in mind both CRE sites are 12 bp
-#long
+#long with flanks.
 
-cre_spac_dist_orient = {}
+cre_space_dist_orient = {}
 bg = []
-cre_sites = [consensus_flank, consensus_flank_rc]
-cre_names = ['consensus', 'RCconsensus']
+seqs = []
+spacing = []
+lessthan5bp_seqs = {}
+seq_name = {}
 
-#spacing refers to number of bases in between the two CREs with flanks so 
-#spacing + 4 refers to the actual number of bases between CREs
+#generate special cases where full flanks aren't used for spacing < 5 bp
 
-spacing = [1, 6, 11, 16, 66]
+lessthan5bpspacing = ['ATTGACGTCATGACGTCAGC'.lower(),
+                      'ATTGACGTCATTGACGTCAGC'.lower(),
+                      'ATTGACGTCAGTTGACGTCAGC'.lower(),
+                      'ATTGACGTCAGATTGACGTCAGC'.lower(),
+                      'ATTGACGTCAGCATTGACGTCAGC'.lower()]
+lessthan5bpnames = ['space_0_', 'space_1_', 'space_2_', 'space_3_', 'space_4_']
 
-for x in bgs_top3_name:
-    bg = bgs_top3_name[x]
-    for space in spacing:
-        for j in range(len(cre_sites)):
-            for k in range(len(cre_sites)):
-                seqs = [bg[:i] + cre_sites[j] + bg[i + len(cre_sites[j]):i + len(cre_sites[j]) + space] + cre_sites[k] + bg[i + 2*len(cre_sites[k]) + space:]
-						for i in range(len(bg)-(2*12 + space) + 1)]
+for x in old_bgs:
+    bg = old_bgs[x]
+    for j in range(len(lessthan5bpspacing)):
+        
+        spacing = lessthan5bpspacing[j]
+        
+        seqs = [bg[:i] + spacing + bg[i+len(spacing):] for i in range(len(bg)-len(spacing)+1)]
+        
+        #distance is written accommodating the actual 2 bp + distance to the proximal CRE
+        
+        lessthan5bp_seqs = {'twosite_' + lessthan5bpnames[j] + 'dist_' + 
+                            str(150 + 2 - len(spacing) - i) + '_' + 
+                            x : seqs[i] for i in range(len(seqs))}
+        
+        cre_space_dist_orient.update(lessthan5bp_seqs)
+        
+#generate spacing starting at a total of 5 and ending at 13 to accomodate a
+#full translocation of CRE from 13 to 21 bp along the DNA. Spacing below refers 
+#to number of bases in between the two CREs with flanks so spacing + 4 refers 
+#to the actual number of bases between CREs
 
-			twobs_spacing = {'2BS ' + str(space) + ' bp spacing consensus+flank x2_dist_' + str((150 - (2*len(consensus_flank)+space)-i)) + '_' + x : seqs[i]
-								for i in range(len(seqs))}
-			consensus_flank_spacing.update(twobs_spacing)
+for x in old_bgs:
+    bg = old_bgs[x]
+    for space in range(1, 10, 1):
+        seqs = [bg[:i] + consensus_flank + bg[i + 12 : i + 12 + space] + consensus_flank + bg[i + 2*12 + space:] for i in range(len(bg)-(2*12 + space) + 1)]
+        
+        #Spacing is written accommodating the actual 4 bp + spacing here between CREs
+        
+        seq_name = {'twosite_space_' + str(space + 4) + '_dist_' + 
+                    str((150 - (2*12 + space) + 2 - i)) + '_' +
+                    x : seqs[i] for i in range(len(seqs))}
+        
+        cre_space_dist_orient.update(seq_name)
+                
+    subpool_libraries['minP'] = cre_space_dist_orient
+    print(len(cre_space_dist_orient), "twosite sequences in minP subpool")
+    
+    csv_writer(cre_space_dist_orient, 'cre_test_twosite.csv')
+    
 
-	subpool_libraries['subpool_3'] = consensus_flank_spacing
-	print len(consensus_flank_spacing), "sequences in subpool 3"
-
-
-
-
+#2-site library design with fixed proximal CREs and moving distal CREs.
+#Proximal and distal CREs will be offset by 0, 5, 10, and 15 from the beginning
+#of the promoter while the distal CRE moves from 0 bp spacing to the end of the
+#background
+ 
 
 
 #oldcode
